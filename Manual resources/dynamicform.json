@@ -1,0 +1,91 @@
+[
+  {
+    "key": "formRow1",
+    "templateOptions": {},
+    "fieldGroup": [
+      {
+        "key": "teamdrivename",
+        "templateOptions": {
+          "label": "Teamdrive Name"
+        },
+        "type": "input",
+        "summaryVisibility": "Show",
+        "requiresTemplateOptions": true,
+        "requiresKey": true,
+        "requiresDataSource": false
+      },
+      {
+        "key": "searchfieldUser",
+        "templateOptions": {
+          "label": "Search file organizer user (enter exact email address)",
+          "required": true,
+          "placeholder": "Exact email address of user",
+          "pattern": "^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$"
+        },
+        "type": "input",
+        "summaryVisibility": "Hide element",
+        "requiresTemplateOptions": true,
+        "requiresKey": true,
+        "requiresDataSource": false
+      }
+    ],
+    "type": "formrow",
+    "requiresTemplateOptions": true,
+    "requiresKey": true,
+    "requiresDataSource": false
+  },
+  {
+    "key": "formRow",
+    "templateOptions": {},
+    "fieldGroup": [
+      {
+        "key": "user",
+        "templateOptions": {
+          "label": "Select file organizer user",
+          "required": true,
+          "grid": {
+            "columns": [
+              {
+                "headerName": "Primary Email",
+                "field": "primaryEmail"
+              },
+              {
+                "headerName": "Full Name",
+                "field": "fullName"
+              }
+            ],
+            "height": 300,
+            "rowSelection": "single"
+          },
+          "dataSourceConfig": {
+            "dataSourceGuid": "$dataSourceGuid_0",
+            "input": {
+              "propertyInputs": [
+                {
+                  "propertyName": "searchValue",
+                  "otherFieldValue": {
+                    "otherFieldKey": "searchfieldUser"
+                  }
+                }
+              ]
+            }
+          },
+          "useDefault": true,
+          "searchPlaceHolder": "Search this data",
+          "allowCsvDownload": false,
+          "defaultSelectorProperty": "primaryEmail"
+        },
+        "hideExpression": "!model[\"searchfieldUser\"]",
+        "type": "grid",
+        "summaryVisibility": "Show",
+        "requiresTemplateOptions": true,
+        "requiresKey": true,
+        "requiresDataSource": true
+      }
+    ],
+    "type": "formrow",
+    "requiresTemplateOptions": true,
+    "requiresKey": true,
+    "requiresDataSource": false
+  }
+]
