@@ -82,92 +82,90 @@ function Resolve-GoogleError {
     }
 }
 
-function Resolve-HTTPError {
+function Get-GoogleWSAccessToken {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory,
-            ValueFromPipeline
-        )]
-        [object]$ErrorObject
+        [Parameter()]
+        [string]
+        $Issuer,
+
+        [Parameter()]
+        [string]
+        $Subject,
+
+        [Parameter()]
+        [string[]]$Scopes,
+
+        [Parameter()]
+        [string]
+        $P12CertificateBase64,
+
+        [Parameter()]
+        [string]
+        $P12CertificatePassword
     )
-    process {
-        $httpErrorObj = [PSCustomObject]@{
-            FullyQualifiedErrorId = $ErrorObject.FullyQualifiedErrorId
-            MyCommand             = $ErrorObject.InvocationInfo.MyCommand
-            RequestUri            = $ErrorObject.TargetObject.RequestUri
-            ScriptStackTrace      = $ErrorObject.ScriptStackTrace
-            ErrorMessage          = ''
+
+    try {
+        $now = [math]::Round(((Get-Date).ToUniversalTime() - ([datetime]"1970-01-01T00:00:00Z").ToUniversalTime()).TotalSeconds)
+        $jwtHeader = @{
+            alg = 'RS256'
+            typ = 'JWT'
+        } | ConvertTo-Json
+        $jwtBase64Header = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($jwtHeader))
+
+        $jwtPayload = [Ordered]@{
+            iss   = $Issuer
+            sub   = $Subject
+            scope = $($Scopes -join " ")
+            aud   = "https://www.googleapis.com/oauth2/v4/token"
+            exp   = $now + 3600
+            iat   = $now
+        } | ConvertTo-Json
+        $jwtBase64Payload = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($jwtPayload))
+
+        $rawP12Certificate = [system.convert]::FromBase64String($P12CertificateBase64)
+        $p12Certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($rawP12Certificate, $P12CertificatePassword, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
+        $rsaPrivate = $P12Certificate.PrivateKey
+        $rsa = [System.Security.Cryptography.RSACryptoServiceProvider]::new()
+        $rsa.ImportParameters($rsaPrivate.ExportParameters($true))
+        $signatureInput = "$jwtBase64Header.$jwtBase64Payload"
+        $signature = $rsa.SignData([Text.Encoding]::UTF8.GetBytes($signatureInput), "SHA256")
+        $base64Signature = [System.Convert]::ToBase64String($signature)
+        $jwtToken = "$signatureInput.$base64Signature"
+
+        $splatParams = @{
+            Uri         = 'https://www.googleapis.com/oauth2/v4/token'
+            Method      = 'POST'
+            Body        = @{
+                grant_type = 'urn:ietf:params:oauth:grant-type:jwt-bearer'
+                assertion  = $jwtToken
+            }
+            ContentType = 'application/x-www-form-urlencoded'
         }
-        if ($ErrorObject.Exception.GetType().FullName -eq 'Microsoft.Powershell.Commands.HttpResponseException') {
-            $httpErrorObj.ErrorMessage = $ErrorObject.ErrorDetails.Message
-        }
-        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
-            $httpErrorObj.ErrorMessage = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
-        }
-        Write-Output $httpErrorObj
+        $response = Invoke-RestMethod @splatParams
+        $response.access_token
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
     }
 }
+
 #endregion functions
 
 try {
     #region Create access token
     $actionMessage = "creating acess token"
 
-    # Create a JWT (JSON Web Token) header
-    $header = @{
-        alg = "RS256"
-        typ = "JWT"
-    } | ConvertTo-Json
-    $base64Header = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($header))
-
-    # Calculate the Unix timestamp for 'exp' and 'iat'
-    $now = [Math]::Round((Get-Date (Get-Date).ToUniversalTime() -UFormat "%s"), 0)
-    $createDate = $now
-    $expiryDate = $createDate + 3540 # Expires in 59 minutes
-
-    # Create a JWT payload
-    $payload = [Ordered]@{
-        iss   = "$serviceAccountEmail"
-        sub   = "$userId"
-        scope = "$($scopes -join " ")"
-        aud   = "https://www.googleapis.com/oauth2/v4/token"
-        exp   = "$expiryDate"
-        iat   = "$createDate"
-    } | ConvertTo-Json
-    $base64Payload = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload))
-
-    # Convert Base64 string to certificate
-    $rawP12Certificate = [system.convert]::FromBase64String($p12CertificateBase64)
-    $p12Certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($rawP12Certificate, $p12CertificatePassword, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
-
-    # Extract the private key from the P12 certificate
-    $rsaPrivate = $P12Certificate.PrivateKey
-    $rsa = [System.Security.Cryptography.RSACryptoServiceProvider]::new()
-    $rsa.ImportParameters($rsaPrivate.ExportParameters($true))
-
-    # Sign the JWT
-    $signatureInput = "$base64Header.$base64Payload"
-    $signature = $rsa.SignData([Text.Encoding]::UTF8.GetBytes($signatureInput), "SHA256")
-    $base64Signature = [System.Convert]::ToBase64String($signature)
-
-    # Create the JWT token
-    $jwtToken = "$signatureInput.$base64Signature"
-
-    $createAccessTokenBody = [Ordered]@{
-        grant_type = "urn:ietf:params:oauth:grant-type:jwt-bearer"
-        assertion  = $jwtToken
+    Write-Information 'Getting JWT token'
+    $splatGetGoogleWSTokenParams = @{
+        Issuer                 = "$($serviceAccountEmail)"
+        Subject                = "$($userId)"
+        Scopes                 = "$($scopes -join " ")"
+        P12CertificateBase64   = $p12CertificateBase64
+        P12CertificatePassword = $p12CertificatePassword
     }
 
-    $createAccessTokenSplatParams = @{
-        Uri         = "https://www.googleapis.com/oauth2/v4/token"
-        Method      = "POST"
-        Body        = $createAccessTokenBody
-        ContentType = "application/x-www-form-urlencoded"
-        Verbose     = $false
-        ErrorAction = "Stop"
-    }
-
-    $createAccessTokenResponse = Invoke-RestMethod @createAccessTokenSplatParams
+    $createAccessTokenResponse = Get-GoogleWSAccessToken @splatGetGoogleWSTokenParams
 
     Write-Verbose "Created access token. Result: $($createAccessTokenResponse | ConvertTo-Json)."
     #endregion Create access token
